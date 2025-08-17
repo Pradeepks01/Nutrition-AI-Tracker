@@ -9,7 +9,6 @@ ENV/
 
 # Ignore environment variables
 .env
-.env.*
 
 # Ignore SQLite database
 *.sqlite3
