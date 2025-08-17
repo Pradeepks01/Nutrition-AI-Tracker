@@ -1,0 +1,27 @@
+# Ignore Python cache files
+__pycache__/
+*.pyc
+
+# Ignore virtual environment
+venv/
+env/
+ENV/
+
+# Ignore environment variables
+.env
+.env.*
+
+# Ignore SQLite database
+*.sqlite3
+*.db
+
+# Ignore test cache
+.pytest_cache/
+
+# Ignore instance folder (if Flask uses it for config)
+instance/
+
+# Ignore editor config (optional)
+.vscode/
+.idea/
+
