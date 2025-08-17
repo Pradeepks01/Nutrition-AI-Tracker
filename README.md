@@ -100,7 +100,7 @@ DATABASE_URL=sqlite:///fittrack.db
 
 Watch a quick demo of **Nutrition-AI-Tracker** in action:
 
-➡️ [Click to watch the video](./frontend/assets/Nutrition-AI-Tracker.mp4)
+➡️ [Click to watch the video] (https://github.com/Pradeepks01/Nutrition-AI-Tracker/blob/main/frontend/assets/NutritionAI_Tracker.mp4)
 
 > (Right-click and select **"Open in new tab"** or **"Save video as..."** if it doesn't play directly)
 
