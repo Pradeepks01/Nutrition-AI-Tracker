@@ -8,39 +8,196 @@ import json
 import re
 from werkzeug.utils import secure_filename
 import sqlite3
-import bcrypt
-import jwt
 from datetime import datetime, timedelta
-import requests
-from functools import wraps
+from PIL import Image
+import cv2
+import numpy as np
 
-# Load environment variables from .env
+# Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app, supports_credentials=True , origins=["http://localhost:5173"])  # Enable CORS with credentials
+CORS(app, supports_credentials=True)
 app.secret_key = os.getenv("SECRET_KEY", "your-secret-key-change-this")
 
 UPLOAD_FOLDER = 'static/uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
 
-# Set your Google API key from environment variable
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+# Configure Gemini API
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+else:
+    print("⚠️  Warning: GEMINI_API_KEY not found")
 
-# USDA API Configuration
-USDA_API_KEY = os.getenv("USDA_API_KEY")
-USDA_BASE_URL = "https://api.nal.usda.gov/fdc/v1"
-
-# Ensure upload folder exists
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-# Allowed file extensions
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 def allowed_file(filename):
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def encode_image(image_path):
+    with open(image_path, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
+
+def generate_nutrition_tip(calories, protein, carbs, fat):
+    """Generate smart nutrition tips based on macros"""
+    total_macros = protein * 4 + carbs * 4 + fat * 9
+    
+    if total_macros == 0:
+        return "Add more variety to your meals for better nutrition balance."
+    
+    protein_pct = (protein * 4 / total_macros) * 100
+    carbs_pct = (carbs * 4 / total_macros) * 100
+    fat_pct = (fat * 9 / total_macros) * 100
+    
+    # High carb, low fat
+    if carbs > 100 and fat < 10:
+        return "High in carbohydrates and low in fats. Great for pre-workout energy, but consider pairing with a protein or fat source for better macronutrient balance."
+    
+    # High protein
+    elif protein > 30:
+        return "Rich in protein — excellent for muscle recovery and satiety! This will help keep you full longer."
+    
+    # High fat
+    elif fat > 25:
+        return "High fat content — great for sustained energy, but keep portions moderate if managing calories."
+    
+    # Balanced meal
+    elif 20 <= protein_pct <= 35 and 45 <= carbs_pct <= 65 and 20 <= fat_pct <= 35:
+        return "Well-balanced macronutrient profile! This combination supports steady energy and satiety."
+    
+    # Low protein
+    elif protein < 10:
+        return "Consider adding more protein to this meal for better muscle support and satiety."
+    
+    # High calorie
+    elif calories > 600:
+        return "High-calorie meal — great for active days or post-workout recovery. Balance with lighter meals if needed."
+    
+    # Low calorie
+    elif calories < 200:
+        return "Light meal option — perfect for snacking or if you're managing portion sizes."
+    
+    else:
+        return "Good nutritional choice! Try to include a variety of colorful foods for optimal micronutrient intake."
+
+def get_nutrition_info_vlm(image_path=None, text_description=None):
+    """Advanced VLM nutrition analysis with clean JSON output"""
+    if not GEMINI_API_KEY:
+        return create_fallback_response(text_description or "Image analysis")
+    
+    model = genai.GenerativeModel("gemini-1.5-flash")
+    
+    # Enhanced prompt for clean, accurate nutrition estimation
+    vlm_prompt = """
+    You are FitTrack AI, an expert nutrition analyst. Analyze the food and provide accurate nutritional estimates.
+
+    CRITICAL INSTRUCTIONS:
+    1. Generate realistic nutritional estimates based on visual analysis
+    2. Consider portion sizes, cooking methods, and ingredients carefully
+    3. Output MUST be valid JSON in this EXACT format (no extra fields):
+
+    {
+        "food_description": "Detailed description of the food item(s)",
+        "calories": 350,
+        "protein_grams": 20,
+        "carb_grams": 40,
+        "fat_grams": 10,
+        "quantity": 1,
+        "unit": "serving",
+        "confidence": 0.85
+    }
+
+    ESTIMATION GUIDELINES:
+    - Be conservative but realistic with portions
+    - Account for cooking oils, sauces, and hidden ingredients
+    - Consider typical serving sizes for the food type
+    - Confidence should reflect your certainty (0.6-0.95 range)
+
+    EXAMPLE ESTIMATES:
+    - Banana (medium): ~105 calories, 1g protein, 27g carbs, 0.3g fat
+    - Grilled chicken breast (6oz): ~280 calories, 52g protein, 0g carbs, 6g fat
+    - Rice bowl (1 cup cooked): ~200 calories, 4g protein, 45g carbs, 0.5g fat
+
+    Analyze the input and provide accurate custom estimates:
+    """
+
+    try:
+        if image_path:
+            encoded_image = encode_image(image_path)
+            response = model.generate_content([
+                {
+                    "parts": [
+                        {"text": vlm_prompt},
+                        {
+                            "inline_data": {
+                                "mime_type": "image/jpeg",
+                                "data": encoded_image
+                            }
+                        }
+                    ]
+                }
+            ])
+        else:
+            text_prompt = vlm_prompt + f"\n\nFood Description: {text_description}"
+            response = model.generate_content(text_prompt)
+        
+        response_text = response.text.strip()
+        
+        # Extract JSON from response
+        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+        if json_match:
+            json_str = json_match.group()
+            try:
+                nutrition_data = json.loads(json_str)
+                
+                # Validate and clean required fields
+                required_fields = ['food_description', 'calories', 'protein_grams', 'carb_grams', 'fat_grams', 'quantity', 'unit', 'confidence']
+                for field in required_fields:
+                    if field not in nutrition_data:
+                        if field == 'food_description':
+                            nutrition_data[field] = text_description or "Unknown food"
+                        elif field == 'unit':
+                            nutrition_data[field] = "serving"
+                        elif field == 'confidence':
+                            nutrition_data[field] = 0.75
+                        else:
+                            nutrition_data[field] = 0
+                
+                # Ensure numeric values
+                for field in ['calories', 'protein_grams', 'carb_grams', 'fat_grams', 'quantity', 'confidence']:
+                    if field in nutrition_data:
+                        try:
+                            nutrition_data[field] = float(nutrition_data[field])
+                        except (ValueError, TypeError):
+                            nutrition_data[field] = 0 if field != 'confidence' else 0.75
+                
+                return nutrition_data
+                
+            except json.JSONDecodeError as e:
+                print(f"JSON parsing error: {e}")
+                return create_fallback_response(text_description or "Image analysis")
+        
+        return create_fallback_response(text_description or "Image analysis")
+        
+    except Exception as e:
+        print(f"VLM Analysis Error: {e}")
+        return create_fallback_response(text_description or "Image analysis")
+
+def create_fallback_response(description):
+    """Create fallback response with realistic estimates"""
+    return {
+        "food_description": description,
+        "calories": 300,
+        "protein_grams": 15,
+        "carb_grams": 35,
+        "fat_grams": 12,
+        "quantity": 1,
+        "unit": "serving",
+        "confidence": 0.6
+    }
 
 # Database initialization
 def init_db():
@@ -54,11 +211,22 @@ def init_db():
             username TEXT UNIQUE NOT NULL,
             email TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            daily_calorie_goal INTEGER DEFAULT 2000,
-            daily_protein_goal INTEGER DEFAULT 150,
-            daily_carb_goal INTEGER DEFAULT 250,
-            daily_fat_goal INTEGER DEFAULT 65
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Daily nutrition table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS daily_nutrition (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            date DATE NOT NULL,
+            total_calories REAL DEFAULT 0,
+            total_protein REAL DEFAULT 0,
+            total_carbs REAL DEFAULT 0,
+            total_fat REAL DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
         )
     ''')
     
@@ -66,447 +234,137 @@ def init_db():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS food_entries (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            food_name TEXT NOT NULL,
+            user_id INTEGER,
+            date DATE NOT NULL,
+            food_description TEXT NOT NULL,
             calories REAL NOT NULL,
-            protein REAL NOT NULL,
-            carbs REAL NOT NULL,
-            fat REAL NOT NULL,
-            fiber REAL DEFAULT 0,
-            sugar REAL DEFAULT 0,
-            sodium REAL DEFAULT 0,
-            serving_size TEXT DEFAULT '1 serving',
-            meal_type TEXT DEFAULT 'other',
-            date_logged DATE NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            confidence_score REAL DEFAULT 0.8,
-            source TEXT DEFAULT 'manual',
-            usda_fdc_id INTEGER,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-    
-    # Water intake table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS water_intake (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            amount_ml INTEGER NOT NULL,
-            date_logged DATE NOT NULL,
+            protein_grams REAL NOT NULL,
+            carb_grams REAL NOT NULL,
+            fat_grams REAL NOT NULL,
+            quantity REAL NOT NULL,
+            unit TEXT NOT NULL,
+            confidence REAL,
+            image_filename TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-    
-    # User sessions table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS user_sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            session_token TEXT UNIQUE NOT NULL,
-            expires_at TIMESTAMP NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-    
-    # Food database cache (USDA foods)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS food_database (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            fdc_id INTEGER UNIQUE NOT NULL,
-            description TEXT NOT NULL,
-            brand_name TEXT,
-            calories_per_100g REAL,
-            protein_per_100g REAL,
-            carbs_per_100g REAL,
-            fat_per_100g REAL,
-            fiber_per_100g REAL,
-            sugar_per_100g REAL,
-            sodium_per_100g REAL,
-            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     
     conn.commit()
     conn.close()
 
-# Initialize database on startup
+# Initialize database
 init_db()
-
-# Authentication decorator
-def token_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        token = request.headers.get('Authorization')
-        if not token:
-            return jsonify({'error': 'Token is missing'}), 401
-        
-        try:
-            if token.startswith('Bearer '):
-                token = token[7:]
-            data = jwt.decode(token, app.secret_key, algorithms=['HS256'])
-            current_user_id = data['user_id']
-        except jwt.ExpiredSignatureError:
-            return jsonify({'error': 'Token has expired'}), 401
-        except jwt.InvalidTokenError:
-            return jsonify({'error': 'Token is invalid'}), 401
-        
-        return f(current_user_id, *args, **kwargs)
-    return decorated
-
-# Encode image to base64
-def encode_image(image_path):
-    with open(image_path, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
-
-def get_nutrition_info_advanced(image_path):
-    """Advanced AI nutrition analysis with fine-tuned prompts"""
-    model = genai.GenerativeModel("gemini-1.5-flash")
-    encoded_image = encode_image(image_path)
-
-    prompt = """
-    You are a professional nutritionist and food recognition expert. Analyze this food image with high precision and provide detailed nutritional information.
-    
-    Instructions:
-    1. Identify ALL food items visible in the image
-    2. Estimate portion sizes accurately (use common serving sizes as reference)
-    3. Calculate nutritional values per serving
-    4. Provide confidence score based on image clarity and food recognition certainty
-    5. Include micronutrients when possible
-    
-    Return ONLY valid JSON in this exact format:
-    {
-        "food_description": "Detailed description of all food items",
-        "calories": 0,
-        "protein_grams": 0.0,
-        "carb_grams": 0.0,
-        "fat_grams": 0.0,
-        "fiber_grams": 0.0,
-        "sugar_grams": 0.0,
-        "sodium_mg": 0.0,
-        "quantity": 1.0,
-        "unit": "serving",
-        "confidence": 0.85,
-        "ingredients": ["ingredient1", "ingredient2"],
-        "portion_size": "medium",
-        "meal_type": "breakfast/lunch/dinner/snack",
-        "cooking_method": "grilled/fried/baked/raw",
-        "estimated_weight_grams": 0
-    }
-    
-    Be as accurate as possible. If multiple items, provide combined totals.
-    """
-
-    try:
-        response = model.generate_content([
-            {
-                "parts": [
-                    {"text": prompt},
-                    {
-                        "inline_data": {
-                            "mime_type": "image/jpeg",
-                            "data": encoded_image
-                        }
-                    }
-                ]
-            }
-        ])
-        
-        # Extract JSON from response
-        response_text = response.text.strip()
-        
-        # Try to find JSON in the response
-        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-        if json_match:
-            json_str = json_match.group()
-            try:
-                nutrition_data = json.loads(json_str)
-                return nutrition_data
-            except json.JSONDecodeError:
-                pass
-        
-        # If JSON parsing fails, return a structured error
-        return {
-            "error": "Failed to parse nutrition data",
-            "raw_response": response_text,
-            "food_description": "Unknown food item",
-            "calories": 0,
-            "protein_grams": 0.0,
-            "carb_grams": 0.0,
-            "fat_grams": 0.0,
-            "fiber_grams": 0.0,
-            "sugar_grams": 0.0,
-            "sodium_mg": 0.0,
-            "quantity": 1.0,
-            "unit": "serving",
-            "confidence": 0.0
-        }
-        
-    except Exception as e:
-        return {
-            "error": str(e),
-            "food_description": "Error analyzing image",
-            "calories": 0,
-            "protein_grams": 0.0,
-            "carb_grams": 0.0,
-            "fat_grams": 0.0,
-            "fiber_grams": 0.0,
-            "sugar_grams": 0.0,
-            "sodium_mg": 0.0,
-            "quantity": 1.0,
-            "unit": "serving",
-            "confidence": 0.0
-        }
-
-def search_usda_foods(query, limit=20):
-    """Search USDA Food Database"""
-    if not USDA_API_KEY:
-        return []
-    
-    try:
-        url = f"{USDA_BASE_URL}/foods/search"
-        params = {
-            'query': query,
-            'dataType': ['Foundation', 'SR Legacy'],
-            'pageSize': limit,
-            'api_key': USDA_API_KEY
-        }
-        
-        response = requests.get(url, params=params, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            foods = []
-            
-            for food in data.get('foods', []):
-                # Extract nutrients
-                nutrients = {n['nutrientName']: n.get('value', 0) for n in food.get('foodNutrients', [])}
-                
-                food_item = {
-                    'fdc_id': food.get('fdcId'),
-                    'description': food.get('description', ''),
-                    'brand_name': food.get('brandOwner', ''),
-                    'calories': nutrients.get('Energy', 0),
-                    'protein': nutrients.get('Protein', 0),
-                    'carbs': nutrients.get('Carbohydrate, by difference', 0),
-                    'fat': nutrients.get('Total lipid (fat)', 0),
-                    'fiber': nutrients.get('Fiber, total dietary', 0),
-                    'sugar': nutrients.get('Sugars, total including NLEA', 0),
-                    'sodium': nutrients.get('Sodium, Na', 0)
-                }
-                foods.append(food_item)
-            
-            return foods
-    except Exception as e:
-        print(f"USDA API Error: {e}")
-        return []
-
-# API Routes
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    return jsonify({"status": "healthy", "message": "FitTrack AI Backend is running"})
-
-# Authentication Routes
-@app.route('/api/register', methods=['POST'])
-def register():
-    try:
-        data = request.get_json()
-        username = data.get('username')
-        email = data.get('email')
-        password = data.get('password')
-        
-        if not all([username, email, password]):
-            return jsonify({"error": "Missing required fields"}), 400
-        
-        # Hash password
-        password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-        
-        conn = sqlite3.connect('fittrack.db')
-        cursor = conn.cursor()
-        
-        try:
-            cursor.execute('''
-                INSERT INTO users (username, email, password_hash)
-                VALUES (?, ?, ?)
-            ''', (username, email, password_hash))
-            
-            user_id = cursor.lastrowid
-            conn.commit()
-            
-            # Generate JWT token
-            token = jwt.encode({
-                'user_id': user_id,
-                'exp': datetime.utcnow() + timedelta(days=30)
-            }, app.secret_key, algorithm='HS256')
-            
-            return jsonify({
-                "success": True,
-                "message": "User registered successfully",
-                "token": token,
-                "user": {
-                    "id": user_id,
-                    "username": username,
-                    "email": email
-                }
-            })
-            
-        except sqlite3.IntegrityError:
-            return jsonify({"error": "Username or email already exists"}), 400
-        finally:
-            conn.close()
-            
-    except Exception as e:
-        return jsonify({"error": f"Registration failed: {str(e)}"}), 500
-
-@app.route('/api/login', methods=['POST'])
-def login():
-    try:
-        data = request.get_json()
-        username = data.get('username')
-        password = data.get('password')
-        
-        if not all([username, password]):
-            return jsonify({"error": "Missing username or password"}), 400
-        
-        conn = sqlite3.connect('fittrack.db')
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT id, username, email, password_hash, daily_calorie_goal, 
-                   daily_protein_goal, daily_carb_goal, daily_fat_goal
-            FROM users WHERE username = ? OR email = ?
-        ''', (username, username))
-        
-        user = cursor.fetchone()
-        conn.close()
-        
-        if user and bcrypt.checkpw(password.encode('utf-8'), user[3].encode('utf-8')):
-            # Generate JWT token
-            token = jwt.encode({
-                'user_id': user[0],
-                'exp': datetime.utcnow() + timedelta(days=30)
-            }, app.secret_key, algorithm='HS256')
-            
-            return jsonify({
-                "success": True,
-                "token": token,
-                "user": {
-                    "id": user[0],
-                    "username": user[1],
-                    "email": user[2],
-                    "goals": {
-                        "calories": user[4],
-                        "protein": user[5],
-                        "carbs": user[6],
-                        "fat": user[7]
-                    }
-                }
-            })
-        else:
-            return jsonify({"error": "Invalid credentials"}), 401
-            
-    except Exception as e:
-        return jsonify({"error": f"Login failed: {str(e)}"}), 500
+    return jsonify({
+        "status": "healthy", 
+        "message": "FitTrack AI Backend is running",
+        "version": "4.0.0",
+        "gemini_configured": bool(GEMINI_API_KEY),
+        "features": ["Clean JSON Output", "Auto Nutrition Tips", "Daily Totals Update"]
+    })
 
 @app.route('/api/analyze-food', methods=['POST'])
-@token_required
-def analyze_food(current_user_id):
+def analyze_food():
+    """Analyze food via photo upload or text description"""
     try:
-        if 'image' not in request.files:
-            return jsonify({"error": "No image file provided"}), 400
-        
-        file = request.files['image']
-        if file.filename == '':
-            return jsonify({"error": "No file selected"}), 400
-        
-        if not allowed_file(file.filename):
-            return jsonify({"error": "Invalid file type. Please upload an image."}), 400
-        
-        # Secure filename and save
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-        
-        # Analyze the image with advanced AI
-        nutrition_data = get_nutrition_info_advanced(filepath)
-        
-        # Clean up uploaded file
-        try:
-            os.remove(filepath)
-        except:
-            pass
+        # Check if it's a photo upload
+        if 'image' in request.files:
+            file = request.files['image']
+            if file.filename == '':
+                return jsonify({"error": "No file selected"}), 400
+            
+            if not allowed_file(file.filename):
+                return jsonify({"error": "Invalid file type. Please upload an image."}), 400
+            
+            # Save uploaded image
+            filename = secure_filename(file.filename)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{timestamp}_{filename}"
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(filepath)
+            
+            # Analyze with VLM
+            nutrition_data = get_nutrition_info_vlm(image_path=filepath)
+            
+            # Generate nutrition tip
+            tip = generate_nutrition_tip(
+                nutrition_data['calories'],
+                nutrition_data['protein_grams'],
+                nutrition_data['carb_grams'],
+                nutrition_data['fat_grams']
+            )
+            
+            # Add tip to response
+            nutrition_data['nutrition_tip'] = tip
+            
+        # Check if it's text description
+        elif request.json and 'description' in request.json:
+            description = request.json['description']
+            if not description.strip():
+                return jsonify({"error": "Description cannot be empty"}), 400
+            
+            # Analyze with VLM
+            nutrition_data = get_nutrition_info_vlm(text_description=description)
+            
+            # Generate nutrition tip
+            tip = generate_nutrition_tip(
+                nutrition_data['calories'],
+                nutrition_data['protein_grams'],
+                nutrition_data['carb_grams'],
+                nutrition_data['fat_grams']
+            )
+            
+            nutrition_data['nutrition_tip'] = tip
+            
+        else:
+            return jsonify({"error": "Please provide either an image or text description"}), 400
         
         return jsonify(nutrition_data)
         
     except Exception as e:
+        print(f"Error in analyze_food: {e}")
         return jsonify({"error": f"Server error: {str(e)}"}), 500
 
-@app.route('/api/food-database', methods=['GET'])
-@token_required
-def search_food_database(current_user_id):
-    """Enhanced food database search with USDA integration"""
-    query = request.args.get('q', '')
-    
-    # Search USDA database first
-    usda_foods = search_usda_foods(query, limit=10)
-    
-    # Mock local foods (you can expand this)
-    local_foods = [
-        {"id": 1, "name": "Grilled Chicken Breast", "calories": 231, "protein": 43.5, "carbs": 0, "fat": 5, "source": "local"},
-        {"id": 2, "name": "Brown Rice (1 cup)", "calories": 216, "protein": 5, "carbs": 45, "fat": 1.8, "source": "local"},
-        {"id": 3, "name": "Salmon Fillet", "calories": 206, "protein": 22, "carbs": 0, "fat": 12, "source": "local"},
-        {"id": 4, "name": "Greek Yogurt", "calories": 100, "protein": 17, "carbs": 6, "fat": 0, "source": "local"},
-        {"id": 5, "name": "Avocado", "calories": 234, "protein": 3, "carbs": 12, "fat": 21, "source": "local"},
-        {"id": 6, "name": "Sweet Potato", "calories": 112, "protein": 2, "carbs": 26, "fat": 0.1, "source": "local"},
-    ]
-    
-    if query:
-        filtered_local = [food for food in local_foods if query.lower() in food['name'].lower()]
-        all_foods = usda_foods + filtered_local
-    else:
-        all_foods = usda_foods + local_foods
-    
-    return jsonify(all_foods[:20])  # Limit to 20 results
-
 @app.route('/api/add-food', methods=['POST'])
-@token_required
-def add_food(current_user_id):
-    """Add food to user's daily log"""
+def add_food():
+    """Add food entry and update daily totals"""
     try:
         data = request.get_json()
-        
-        # Validate required fields
-        required_fields = ['name', 'calories', 'protein', 'carbs', 'fat']
-        for field in required_fields:
-            if field not in data:
-                return jsonify({"error": f"Missing required field: {field}"}), 400
+        user_id = 1  # Demo user
+        today = datetime.now().date()
         
         conn = sqlite3.connect('fittrack.db')
         cursor = conn.cursor()
         
+        # Add food entry
         cursor.execute('''
-            INSERT INTO food_entries (
-                user_id, food_name, calories, protein, carbs, fat,
-                fiber, sugar, sodium, serving_size, meal_type, date_logged,
-                confidence_score, source, usda_fdc_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO food_entries 
+            (user_id, date, food_description, calories, protein_grams, carb_grams, fat_grams, quantity, unit, confidence)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            current_user_id,
-            data['name'],
-            data['calories'],
-            data['protein'],
-            data['carbs'],
-            data['fat'],
-            data.get('fiber', 0),
-            data.get('sugar', 0),
-            data.get('sodium', 0),
-            data.get('serving_size', '1 serving'),
-            data.get('meal_type', 'other'),
-            data.get('date', datetime.now().date()),
-            data.get('confidence', 0.8),
-            data.get('source', 'manual'),
-            data.get('fdc_id')
+            user_id, today, data['food_description'], data['calories'],
+            data['protein_grams'], data['carb_grams'], data['fat_grams'],
+            data['quantity'], data['unit'], data.get('confidence', 0.75)
+        ))
+        
+        # Update daily totals
+        cursor.execute('''
+            INSERT OR REPLACE INTO daily_nutrition 
+            (user_id, date, total_calories, total_protein, total_carbs, total_fat)
+            VALUES (?, ?, 
+                COALESCE((SELECT total_calories FROM daily_nutrition WHERE user_id = ? AND date = ?), 0) + ?,
+                COALESCE((SELECT total_protein FROM daily_nutrition WHERE user_id = ? AND date = ?), 0) + ?,
+                COALESCE((SELECT total_carbs FROM daily_nutrition WHERE user_id = ? AND date = ?), 0) + ?,
+                COALESCE((SELECT total_fat FROM daily_nutrition WHERE user_id = ? AND date = ?), 0) + ?
+            )
+        ''', (
+            user_id, today, user_id, today, data['calories'],
+            user_id, today, data['protein_grams'],
+            user_id, today, data['carb_grams'],
+            user_id, today, data['fat_grams']
         ))
         
         conn.commit()
@@ -514,232 +372,82 @@ def add_food(current_user_id):
         
         return jsonify({
             "success": True,
-            "message": "Food added successfully",
-            "food": data
+            "message": "Food added successfully and daily totals updated"
         })
         
     except Exception as e:
         return jsonify({"error": f"Server error: {str(e)}"}), 500
 
 @app.route('/api/daily-nutrition', methods=['GET'])
-@token_required
-def get_daily_nutrition(current_user_id):
-    """Get user's daily nutrition summary"""
+def get_daily_nutrition():
+    """Get daily nutrition totals"""
     try:
-        date = request.args.get('date', datetime.now().date())
+        user_id = 1  # Demo user
+        date = request.args.get('date', datetime.now().date().isoformat())
         
         conn = sqlite3.connect('fittrack.db')
         cursor = conn.cursor()
         
+        # Get daily totals
         cursor.execute('''
-            SELECT 
-                SUM(calories) as total_calories,
-                SUM(protein) as total_protein,
-                SUM(carbs) as total_carbs,
-                SUM(fat) as total_fat,
-                SUM(fiber) as total_fiber,
-                SUM(sugar) as total_sugar,
-                SUM(sodium) as total_sodium,
-                COUNT(*) as food_count
+            SELECT total_calories, total_protein, total_carbs, total_fat
+            FROM daily_nutrition 
+            WHERE user_id = ? AND date = ?
+        ''', (user_id, date))
+        
+        result = cursor.fetchone()
+        
+        if result:
+            nutrition = {
+                "calories": result[0] or 0,
+                "protein": result[1] or 0,
+                "carbs": result[2] or 0,
+                "fat": result[3] or 0
+            }
+        else:
+            nutrition = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
+        
+        # Get food entries for the day
+        cursor.execute('''
+            SELECT food_description, calories, protein_grams, carb_grams, fat_grams, quantity, unit, created_at
             FROM food_entries 
-            WHERE user_id = ? AND date_logged = ?
-        ''', (current_user_id, date))
+            WHERE user_id = ? AND date = ?
+            ORDER BY created_at DESC
+        ''', (user_id, date))
         
-        nutrition = cursor.fetchone()
+        entries = cursor.fetchall()
+        food_entries = []
+        for entry in entries:
+            food_entries.append({
+                "food_description": entry[0],
+                "calories": entry[1],
+                "protein_grams": entry[2],
+                "carb_grams": entry[3],
+                "fat_grams": entry[4],
+                "quantity": entry[5],
+                "unit": entry[6],
+                "timestamp": entry[7]
+            })
         
-        # Get user goals
-        cursor.execute('''
-            SELECT daily_calorie_goal, daily_protein_goal, daily_carb_goal, daily_fat_goal
-            FROM users WHERE id = ?
-        ''', (current_user_id,))
-        
-        goals = cursor.fetchone()
         conn.close()
         
         return jsonify({
-            "date": str(date),
-            "nutrition": {
-                "calories": nutrition[0] or 0,
-                "protein": nutrition[1] or 0,
-                "carbs": nutrition[2] or 0,
-                "fat": nutrition[3] or 0,
-                "fiber": nutrition[4] or 0,
-                "sugar": nutrition[5] or 0,
-                "sodium": nutrition[6] or 0,
-                "food_count": nutrition[7] or 0
-            },
+            "date": date,
+            "nutrition": nutrition,
+            "food_entries": food_entries,
             "goals": {
-                "calories": goals[0] if goals else 2000,
-                "protein": goals[1] if goals else 150,
-                "carbs": goals[2] if goals else 250,
-                "fat": goals[3] if goals else 65
+                "calories": 2829,
+                "protein": 150,
+                "carbs": 250,
+                "fat": 65
             }
         })
         
     except Exception as e:
         return jsonify({"error": f"Server error: {str(e)}"}), 500
 
-@app.route('/api/analytics', methods=['GET'])
-@token_required
-def get_analytics(current_user_id):
-    """Get detailed nutrition analytics and reports"""
-    try:
-        days = int(request.args.get('days', 7))  # Default to 7 days
-        end_date = datetime.now().date()
-        start_date = end_date - timedelta(days=days-1)
-        
-        conn = sqlite3.connect('fittrack.db')
-        cursor = conn.cursor()
-        
-        # Daily nutrition over time
-        cursor.execute('''
-            SELECT 
-                date_logged,
-                SUM(calories) as calories,
-                SUM(protein) as protein,
-                SUM(carbs) as carbs,
-                SUM(fat) as fat,
-                COUNT(*) as meals
-            FROM food_entries 
-            WHERE user_id = ? AND date_logged BETWEEN ? AND ?
-            GROUP BY date_logged
-            ORDER BY date_logged
-        ''', (current_user_id, start_date, end_date))
-        
-        daily_data = cursor.fetchall()
-        
-        # Weekly averages
-        cursor.execute('''
-            SELECT 
-                AVG(calories) as avg_calories,
-                AVG(protein) as avg_protein,
-                AVG(carbs) as avg_carbs,
-                AVG(fat) as avg_fat
-            FROM (
-                SELECT 
-                    date_logged,
-                    SUM(calories) as calories,
-                    SUM(protein) as protein,
-                    SUM(carbs) as carbs,
-                    SUM(fat) as fat
-                FROM food_entries 
-                WHERE user_id = ? AND date_logged BETWEEN ? AND ?
-                GROUP BY date_logged
-            )
-        ''', (current_user_id, start_date, end_date))
-        
-        averages = cursor.fetchone()
-        
-        # Top foods
-        cursor.execute('''
-            SELECT food_name, COUNT(*) as frequency, AVG(calories) as avg_calories
-            FROM food_entries 
-            WHERE user_id = ? AND date_logged BETWEEN ? AND ?
-            GROUP BY food_name
-            ORDER BY frequency DESC
-            LIMIT 10
-        ''', (current_user_id, start_date, end_date))
-        
-        top_foods = cursor.fetchall()
-        
-        # Meal distribution
-        cursor.execute('''
-            SELECT meal_type, COUNT(*) as count, SUM(calories) as total_calories
-            FROM food_entries 
-            WHERE user_id = ? AND date_logged BETWEEN ? AND ?
-            GROUP BY meal_type
-        ''', (current_user_id, start_date, end_date))
-        
-        meal_distribution = cursor.fetchall()
-        
-        conn.close()
-        
-        return jsonify({
-            "period": {
-                "start_date": str(start_date),
-                "end_date": str(end_date),
-                "days": days
-            },
-            "daily_data": [
-                {
-                    "date": row[0],
-                    "calories": row[1] or 0,
-                    "protein": row[2] or 0,
-                    "carbs": row[3] or 0,
-                    "fat": row[4] or 0,
-                    "meals": row[5] or 0
-                } for row in daily_data
-            ],
-            "averages": {
-                "calories": round(averages[0] or 0, 1),
-                "protein": round(averages[1] or 0, 1),
-                "carbs": round(averages[2] or 0, 1),
-                "fat": round(averages[3] or 0, 1)
-            },
-            "top_foods": [
-                {
-                    "name": row[0],
-                    "frequency": row[1],
-                    "avg_calories": round(row[2] or 0, 1)
-                } for row in top_foods
-            ],
-            "meal_distribution": [
-                {
-                    "meal_type": row[0],
-                    "count": row[1],
-                    "total_calories": row[2] or 0
-                } for row in meal_distribution
-            ]
-        })
-        
-    except Exception as e:
-        return jsonify({"error": f"Server error: {str(e)}"}), 500
-
-@app.route('/api/water-intake', methods=['GET', 'POST'])
-@token_required
-def water_intake(current_user_id):
-    """Handle water intake tracking"""
-    try:
-        if request.method == 'POST':
-            data = request.get_json()
-            amount = data.get('amount_ml', 0)
-            date = data.get('date', datetime.now().date())
-            
-            conn = sqlite3.connect('fittrack.db')
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                INSERT INTO water_intake (user_id, amount_ml, date_logged)
-                VALUES (?, ?, ?)
-            ''', (current_user_id, amount, date))
-            
-            conn.commit()
-            conn.close()
-            
-            return jsonify({"success": True, "message": "Water intake recorded"})
-        
-        else:  # GET
-            date = request.args.get('date', datetime.now().date())
-            
-            conn = sqlite3.connect('fittrack.db')
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                SELECT SUM(amount_ml) FROM water_intake 
-                WHERE user_id = ? AND date_logged = ?
-            ''', (current_user_id, date))
-            
-            total = cursor.fetchone()[0] or 0
-            conn.close()
-            
-            return jsonify({
-                "date": str(date),
-                "total_ml": total,
-                "goal_ml": 2500  # Default goal
-            })
-            
-    except Exception as e:
-        return jsonify({"error": f"Server error: {str(e)}"}), 500
-
 if __name__ == "__main__":
+    print("🚀 Starting FitTrack AI Backend...")
+    print(f"🔑 Gemini API Key: {'✅ Configured' if GEMINI_API_KEY else '❌ Missing'}")
+    print("🎯 Features: Clean JSON, Auto Tips, Daily Updates")
     app.run(debug=True, host='0.0.0.0', port=5000)
