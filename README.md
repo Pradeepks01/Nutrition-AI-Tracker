@@ -1,6 +1,6 @@
-# 🥗 Nutrition-AI-Tracker
+# 🥗 FitTrack AI – Nutrition-AI-Tracker
 
-**Nutrition-AI-Tracker** is a beautiful, fully responsive nutrition tracking platform with AI-powered food analysis, water tracking, streak building, and detailed analytics – designed for modern users and ready for production.
+**FitTrack AI** is a fully responsive, AI-powered nutrition tracking platform that automates meal logging via image analysis. It provides daily food logging, macro distribution, nutrition tips, and structured JSON output for easy integration.
 
 ---
 
@@ -14,36 +14,27 @@
 
 - 🌑 **Dark Theme UI** – Clean, modern interface with responsive layout  
 - 🔐 **User Authentication** – Login and register with JWT token handling  
-- 📊 **Dashboard** – Visual summary of daily calories, macros, and water  
-- 🤖 **AI Food Scanner** – Upload food images and analyze (backend ready)  
-- 📈 **Analytics Dashboard** – Track nutrition trends and top foods  
-- 💧 **Water Intake Tracker** – Animated bottle with daily goals  
-- 🔥 **Streak Tracking** – Build healthy habits with gamification  
-- 📱 **Fully Responsive** – Works seamlessly on mobile, tablet, and desktop  
+- 🍽️ **Daily Food Log** – Add meals manually or via AI food scanner  
+- 🥗 **Macro Distribution** – Visual breakdown of protein, carbs, fats, and calories  
+- 💡 **Nutrition Tips** – Daily personalized nutrition recommendations  
+- 🤖 **Nutrition AI Analyzer** – AI-powered food image analysis via **Vision-Language Model (VLM)**  
+- 📤 **JSON Output** – Structured output for easy frontend integration  
 
 ---
 
-## 🧠 Backend Ready (Optional)
+## 🧠 Backend Features
 
-Run Flask backend for full AI food recognition and real-time database logging.
-
-- ⚙️ **Flask Server** – Google Gemini AI integration for food image analysis  
-- 🧠 **Gemini & USDA API** – Advanced food recognition and nutritional data  
-- 🛡️ **JWT Auth** – Secure login system with password hashing  
+- ⚙️ **Flask Server** – Handles AI food recognition and meal logging  
+- 🧠 **VLM & Gemini AI Integration** – Advanced food image analysis, portion estimation, and nutritional breakdown  
+- 🛡️ **JWT Authentication** – Secure login system with password hashing  
 - 💾 **SQLite Database** – Persistent storage for all user data  
-- 📤 **Structured Output** – Consistent, clean JSON for frontend integration  
+- 📤 **Structured JSON Output** – Consistent data format for frontend consumption  
 
 ---
 
-## ✅ Key Features Working
+## 📸 Screenshots
 
-- ✅ User Auth – Register, login, secure session handling  
-- ✅ Nutrition Dashboard – View daily intake and      macronutrients  
-- ✅ Food Logging – Add meals manually or with AI  
-- ✅ Water Tracker – Visual progress with interactive bottle  
-- ✅ Analytics – Weekly, monthly insights and trends  
-- ✅ Streaks – Track your consistency and build habits  
-- ✅ Responsive UI – Optimized for all screen sizes  
+https://github.com/Pradeepks01/Nutrition-AI-Tracker/tree/d7913de3119fc840e3d960159a5206445123eec5/frontend/assets 
 
 ---
 
@@ -56,12 +47,9 @@ cd frontend
 npm install
 npm run dev
 ```
-
-🌐 **Deployed to Vercel**: [nutrition-ai-tracker.vercel.app](https://nutrition-ai-tracker.vercel.app)
-
 ---
 
-### 🔁 Backend (Flask + Gemini AI + SQLite)
+### 🔁 Backend (Flask + VLM + Gemini AI + SQLite)
 
 Only needed if you want real AI food scanning and persistence.
 
@@ -73,7 +61,6 @@ cp .env.example .env
 # GEMINI_API_KEY=<your-google-gemini-api-key>
 python app.py
 ```
-
 ---
 
 ### 🌍 Environment Variables (`.env` for backend)
@@ -82,25 +69,12 @@ python app.py
 # Google Gemini API Configuration
 GEMINI_API_KEY=your-gemini-key
 
-# USDA Food Database API Key (optional but recommended)
-USDA_API_KEY=your-usda-api-key
-
 # Flask Configuration
 FLASK_ENV=development
 FLASK_DEBUG=True
 SECRET_KEY=your-very-secret-key
 
-# Database Configuration (SQLite used by default)
+# Database Configuration
 DATABASE_URL=sqlite:///fittrack.db
+
 ```
-
----
-
-## 📽️ Demo Video
-
-Watch a quick demo of **Nutrition-AI-Tracker** in action:
-
-➡️ [Click to watch the video] (https://github.com/Pradeepks01/Nutrition-AI-Tracker/blob/main/frontend/assets/NutritionAI_Tracker.mp4)
-
-> (Right-click and select **"Open in new tab"** or **"Save video as..."** if it doesn't play directly)
-
