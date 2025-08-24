@@ -1,15 +1,22 @@
 import React from 'react';
-import { Target } from 'lucide-react';
+import { Target, TrendingUp, Zap, Brain } from 'lucide-react';
 import { Card, CardContent } from './ui/card';
 import { Progress } from './ui/progress';
 import { Badge } from './ui/badge';
 
 const NutritionDashboard: React.FC = () => {
   const nutritionData = {
-    calories: { current: 350, goal: 2829 },
-    protein: { current: 20, goal: 150 },
-    carbs: { current: 40, goal: 350 },
-    fat: { current: 10, goal: 94 }
+    calories: { current: 1250, goal: 2000 },
+    protein: { current: 85, goal: 150 },
+    carbs: { current: 150, goal: 250 },
+    fat: { current: 45, goal: 65 }
+  };
+
+  const aiStats = {
+    foodsRecognized: 1247,
+    avgAccuracy: 94.2,
+    timesSaved: 180, // minutes saved this month
+    confidenceScore: 0.92
   };
 
   const getPercentage = (current: number, goal: number) => {
@@ -64,12 +71,58 @@ const NutritionDashboard: React.FC = () => {
       {/* Daily Nutrition Overview */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Target className="w-6 h-6 text-blue-400" />
+          <Brain className="w-6 h-6 text-primary" />
           <h3 className="text-lg font-semibold">Daily Nutrition</h3>
+          <Badge variant="outline" className="text-green-500 border-green-500/20">
+            AI-Powered
+          </Badge>
         </div>
         <div className="text-sm text-muted-foreground">
           Calorie goal: {nutritionData.calories.goal.toLocaleString()} kcal
         </div>
+      </div>
+
+      {/* AI Performance Stats */}
+      <div className="grid grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="p-4 text-center">
+            <Brain className="w-6 h-6 text-purple-500 mx-auto mb-2" />
+            <div className="text-lg font-bold text-purple-500">
+              {aiStats.foodsRecognized}
+            </div>
+            <div className="text-xs text-muted-foreground">Foods Recognized</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4 text-center">
+            <Target className="w-6 h-6 text-green-500 mx-auto mb-2" />
+            <div className="text-lg font-bold text-green-500">
+              {aiStats.avgAccuracy}%
+            </div>
+            <div className="text-xs text-muted-foreground">Avg Accuracy</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4 text-center">
+            <Zap className="w-6 h-6 text-yellow-500 mx-auto mb-2" />
+            <div className="text-lg font-bold text-yellow-500">
+              {aiStats.timesSaved}m
+            </div>
+            <div className="text-xs text-muted-foreground">Time Saved</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4 text-center">
+            <TrendingUp className="w-6 h-6 text-blue-500 mx-auto mb-2" />
+            <div className="text-lg font-bold text-blue-500">
+              {Math.round(aiStats.confidenceScore * 100)}%
+            </div>
+            <div className="text-xs text-muted-foreground">Confidence</div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Main Calories Progress */}
@@ -109,8 +162,8 @@ const NutritionDashboard: React.FC = () => {
       {/* Macro Distribution */}
       <div>
         <h4 className="text-lg font-semibold mb-4">Macro Distribution</h4>
-        <Badge variant="default" className="w-full justify-center py-2 mb-4 bg-orange-500 hover:bg-orange-600">
-          ✨ Great job keeping up your streak!
+        <Badge variant="default" className="w-full justify-center py-2 mb-4 bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600">
+          🤖 AI Analysis: Excellent macro balance detected!
         </Badge>
         
         <div className="grid grid-cols-3 gap-6">

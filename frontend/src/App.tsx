@@ -1,17 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { User, Calendar, TrendingUp, Droplets, Target, BarChart3, LogOut } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs';
+import { User, LogOut, Target } from 'lucide-react';
 import { Button } from './components/ui/button';
-import NutritionDashboard from './components/NutritionDashboard';
-import FoodLog from './components/FoodLog';
+import DailyNutrition from './components/DailyNutrition';
+import DailyFoodLog from './components/DailyFoodLog';
+import MacroChart from './components/MacroChart';
 import WaterIntake from './components/WaterIntake';
-import WeeklyStats from './components/WeeklyStats';
-import StreakTracker from './components/StreakTracker';
 import NutritionAI from './components/NutritionAI';
-import AnalyticsDashboard from './components/AnalyticsDashboard';
+import NutritionTip from './components/NutritionTip';
 import AuthModal from './components/AuthModal';
-import { apiService } from './services/api';
 
 interface User {
   id: number;
@@ -25,57 +21,148 @@ interface User {
   };
 }
 
+interface FoodEntry {
+  food_description: string;
+  calories: number;
+  protein_grams: number;
+  carb_grams: number;
+  fat_grams: number;
+  quantity: number;
+  unit: string;
+  timestamp: string;
+}
+
+interface NutritionData {
+  food_description: string;
+  calories: number;
+  protein_grams: number;
+  carb_grams: number;
+  fat_grams: number;
+  quantity: number;
+  unit: string;
+  confidence: number;
+  nutrition_tip?: string;
+}
+
 function App() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>({
+    id: 1,
+    username: 'Demo User',
+    email: 'demo@fittrack.ai',
+    goals: { calories: 2829, protein: 150, carbs: 250, fat: 65 }
+  });
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  
+  // Nutrition tracking state
+  const [dailyNutrition, setDailyNutrition] = useState({
+    calories: 0,
+    protein: 0,
+    carbs: 0,
+    fat: 0
+  });
+  
+  const [foodEntries, setFoodEntries] = useState<FoodEntry[]>([]);
+  const [nutritionTip, setNutritionTip] = useState("Upload a food photo or describe your meal to get personalized nutrition insights and tips!");
 
-  useEffect(() => {
-    checkAuthStatus();
-  }, []);
-
-  const checkAuthStatus = async () => {
+  // Load daily nutrition data
+  const loadDailyNutrition = async (date: Date) => {
     try {
-      // Check if user has a stored token
-      const token = localStorage.getItem('fittrack_token');
-      if (token) {
-        // For now, we'll assume the token is valid
-        // In a real app, you'd verify with the backend
-        setUser({
-          id: 1,
-          username: 'Demo User',
-          email: 'demo@fittrack.ai'
-        });
+      const dateStr = date.toISOString().split('T')[0];
+      const response = await fetch(`http://localhost:5000/api/daily-nutrition?date=${dateStr}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        setDailyNutrition(data.nutrition);
+        setFoodEntries(data.food_entries || []);
+      } else {
+        // Fallback to demo data if backend is not available
+        setDailyNutrition({ calories: 0, protein: 0, carbs: 0, fat: 0 });
+        setFoodEntries([]);
       }
     } catch (error) {
-      console.error('Auth check failed:', error);
-      localStorage.removeItem('fittrack_token');
-    } finally {
-      setIsLoading(false);
+      console.error('Error loading daily nutrition:', error);
+      // Use demo data as fallback
+      setDailyNutrition({ calories: 0, protein: 0, carbs: 0, fat: 0 });
+      setFoodEntries([]);
     }
   };
 
-  const handleAuthSuccess = (userData: User) => {
-    setUser(userData);
-    setShowAuthModal(false);
+  // Load data when date changes
+  useEffect(() => {
+    loadDailyNutrition(selectedDate);
+  }, [selectedDate]);
+
+  // Handle food addition from AI analysis
+  const handleFoodAdded = async (nutritionData: NutritionData) => {
+    try {
+      // Add to backend
+      const response = await fetch('http://localhost:5000/api/add-food', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(nutritionData),
+      });
+
+      if (response.ok) {
+        // Update local state immediately for better UX
+        setDailyNutrition(prev => ({
+          calories: prev.calories + nutritionData.calories,
+          protein: prev.protein + nutritionData.protein_grams,
+          carbs: prev.carbs + nutritionData.carb_grams,
+          fat: prev.fat + nutritionData.fat_grams
+        }));
+
+        // Add to food entries
+        const newEntry: FoodEntry = {
+          food_description: nutritionData.food_description,
+          calories: nutritionData.calories,
+          protein_grams: nutritionData.protein_grams,
+          carb_grams: nutritionData.carb_grams,
+          fat_grams: nutritionData.fat_grams,
+          quantity: nutritionData.quantity,
+          unit: nutritionData.unit,
+          timestamp: "Just now"
+        };
+        setFoodEntries(prev => [newEntry, ...prev]);
+
+        // Update nutrition tip if provided
+        if (nutritionData.nutrition_tip) {
+          setNutritionTip(nutritionData.nutrition_tip);
+        }
+      }
+    } catch (error) {
+      console.error('Error adding food:', error);
+      // Still update UI for demo purposes
+      setDailyNutrition(prev => ({
+        calories: prev.calories + nutritionData.calories,
+        protein: prev.protein + nutritionData.protein_grams,
+        carbs: prev.carbs + nutritionData.carb_grams,
+        fat: prev.fat + nutritionData.fat_grams
+      }));
+
+      const newEntry: FoodEntry = {
+        food_description: nutritionData.food_description,
+        calories: nutritionData.calories,
+        protein_grams: nutritionData.protein_grams,
+        carb_grams: nutritionData.carb_grams,
+        fat_grams: nutritionData.fat_grams,
+        quantity: nutritionData.quantity,
+        unit: nutritionData.unit,
+        timestamp: "Just now"
+      };
+      setFoodEntries(prev => [newEntry, ...prev]);
+
+      if (nutritionData.nutrition_tip) {
+        setNutritionTip(nutritionData.nutrition_tip);
+      }
+    }
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('fittrack_token');
-    apiService.clearToken();
     setUser(null);
   };
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Loading FitTrack AI...</p>
-        </div>
-      </div>
-    );
-  }
 
   if (!user) {
     return (
@@ -97,50 +184,12 @@ function App() {
               Get Started
             </Button>
           </div>
-
-          <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
-            <Card>
-              <CardHeader>
-                <BarChart3 className="h-8 w-8 text-primary mb-2" />
-                <CardTitle>AI Food Recognition</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground">
-                  Snap a photo of your meal and get instant nutritional analysis powered by advanced AI.
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <TrendingUp className="h-8 w-8 text-green-500 mb-2" />
-                <CardTitle>Smart Analytics</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground">
-                  Track your progress with detailed charts and insights to optimize your nutrition.
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <Droplets className="h-8 w-8 text-blue-500 mb-2" />
-                <CardTitle>Comprehensive Tracking</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground">
-                  Monitor calories, macros, water intake, and build healthy habits with streak tracking.
-                </p>
-              </CardContent>
-            </Card>
-          </div>
         </div>
 
         <AuthModal 
           open={showAuthModal}
           onClose={() => setShowAuthModal(false)}
-          onSuccess={handleAuthSuccess}
+          onSuccess={setUser}
         />
       </div>
     );
@@ -171,116 +220,42 @@ function App() {
           </div>
         </div>
 
-        {/* Main Content */}
-        <Tabs defaultValue="dashboard" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:grid-cols-5">
-            <TabsTrigger value="dashboard" className="flex items-center gap-2">
-              <BarChart3 className="h-4 w-4" />
-              <span className="hidden sm:inline">Dashboard</span>
-            </TabsTrigger>
-            <TabsTrigger value="ai-scan" className="flex items-center gap-2">
-              <Target className="h-4 w-4" />
-              <span className="hidden sm:inline">AI Scan</span>
-            </TabsTrigger>
-            <TabsTrigger value="food-log" className="flex items-center gap-2">
-              <Calendar className="h-4 w-4" />
-              <span className="hidden sm:inline">Food Log</span>
-            </TabsTrigger>
-            <TabsTrigger value="analytics" className="flex items-center gap-2">
-              <TrendingUp className="h-4 w-4" />
-              <span className="hidden sm:inline">Analytics</span>
-            </TabsTrigger>
-            <TabsTrigger value="water" className="flex items-center gap-2">
-              <Droplets className="h-4 w-4" />
-              <span className="hidden sm:inline">Water</span>
-            </TabsTrigger>
-          </TabsList>
+        {/* Main Layout */}
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* Left Column - Main Dashboard */}
+          <div className="lg:col-span-3 space-y-6">
+            {/* Daily Nutrition Overview */}
+            <DailyNutrition 
+              nutrition={dailyNutrition}
+              goals={user.goals || { calories: 2829, protein: 150, carbs: 250, fat: 65 }}
+            />
 
-          <TabsContent value="dashboard" className="space-y-6">
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-              <div className="lg:col-span-2 space-y-6">
-                <NutritionDashboard />
-                <FoodLog />
-              </div>
-              <div className="space-y-6">
-                <StreakTracker />
-                <WeeklyStats />
-              </div>
-            </div>
-          </TabsContent>
+            {/* Daily Food Log */}
+            <DailyFoodLog 
+              foodEntries={foodEntries}
+              selectedDate={selectedDate}
+              onDateChange={setSelectedDate}
+            />
 
-          <TabsContent value="ai-scan">
-            <div className="grid gap-6 lg:grid-cols-3">
-              <div className="lg:col-span-2">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>AI Food Scanner</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-muted-foreground mb-4">
-                      Upload a photo of your food to get instant nutritional analysis powered by AI.
-                    </p>
-                    <div className="text-center p-8 border-2 border-dashed border-muted rounded-lg">
-                      <Target className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                      <p className="text-muted-foreground">
-                        AI Scanner will be available when backend is connected
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-              <div>
-                <NutritionAI />
-              </div>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="food-log">
-            <div className="space-y-6">
-              <FoodLog />
-            </div>
-          </TabsContent>
-
-          <TabsContent value="analytics">
-            <AnalyticsDashboard />
-          </TabsContent>
-
-          <TabsContent value="water">
-            <div className="grid gap-6 lg:grid-cols-2">
+            {/* Macro Chart and Water Intake */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <MacroChart 
+                protein={dailyNutrition.protein}
+                carbs={dailyNutrition.carbs}
+                fat={dailyNutrition.fat}
+              />
               <WaterIntake />
-              <Card>
-                <CardHeader>
-                  <CardTitle>Hydration Tips</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    <div className="flex items-start gap-3">
-                      <div className="w-2 h-2 bg-blue-500 rounded-full mt-2"></div>
-                      <div>
-                        <h4 className="font-medium">Start your day with water</h4>
-                        <p className="text-sm text-muted-foreground">Drink a glass of water when you wake up to kickstart hydration.</p>
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-3">
-                      <div className="w-2 h-2 bg-blue-500 rounded-full mt-2"></div>
-                      <div>
-                        <h4 className="font-medium">Set regular reminders</h4>
-                        <p className="text-sm text-muted-foreground">Use phone alerts to remind yourself to drink water throughout the day.</p>
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-3">
-                      <div className="w-2 h-2 bg-blue-500 rounded-full mt-2"></div>
-                      <div>
-                        <h4 className="font-medium">Monitor urine color</h4>
-                        <p className="text-sm text-muted-foreground">Pale yellow indicates good hydration levels.</p>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
             </div>
-          </TabsContent>
-        </Tabs>
+
+            {/* Nutrition Tip */}
+            <NutritionTip tip={nutritionTip} />
+          </div>
+
+          {/* Right Column - Nutrition AI */}
+          <div className="lg:col-span-1">
+            <NutritionAI onFoodAdded={handleFoodAdded} />
+          </div>
+        </div>
       </div>
     </div>
   );
