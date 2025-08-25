@@ -6,7 +6,7 @@
 
 
 
----
+
 
 ## 🎨 Frontend Features
 
@@ -30,7 +30,7 @@
 
 ---
 
----
+
 
 ## 🔧 Getting Started
 
@@ -51,8 +51,6 @@ Only needed if you want real AI food scanning and persistence.
 cd backend
 pip install -r requirements.txt
 cp .env.example .env
-# Edit .env and add your API keys:
-# GEMINI_API_KEY=<your-google-gemini-api-key>
 python app.py
 ```
 ---
