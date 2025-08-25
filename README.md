@@ -4,9 +4,7 @@
 
 ---
 
-## 🚀 Live Demo
 
-🔗 [nutrition-ai-tracker.vercel.app](https://nutrition-ai-tracker.vercel.app)
 
 ---
 
@@ -31,10 +29,6 @@
 - 📤 **Structured JSON Output** – Consistent data format for frontend consumption  
 
 ---
-
-## 📸 Screenshots
-
-![Dashboard Screenshot](https://github.com/Pradeepks01/Nutrition-AI-Tracker/blob/bebe308835e9b113bef5fdf23a88ad0827d5f8f6/Screenshot%20from%202025-08-24%2016-01-07.png)
 
 ---
 
